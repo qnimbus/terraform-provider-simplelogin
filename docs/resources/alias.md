@@ -4,14 +4,14 @@ page_title: "simplelogin_alias Resource - SimpleLogin"
 subcategory: ""
 description: |-
   Manages a SimpleLogin alias with an exact address on a verified custom domain, including its forwarding mailboxes, note, display name and enabled state.
-  ~> Deletion is effectively irreversible. When an alias on a custom domain is deleted, SimpleLogin moves the address to the domain's trash and refuses to create the same address again while it is there. Destroying this resource, or changing email (which forces replacement), deletes the alias. Use lifecycle { prevent_destroy = true } for addresses you depend on.
+  ~> Deletion is effectively irreversible. When an alias on a custom domain is deleted, SimpleLogin moves the address to the domain's trash and refuses to create the same address again while it is there. Destroying this resource, or changing email (which forces replacement), deletes the alias unless on_destroy = "disable" is set. Use lifecycle { prevent_destroy = true } for addresses you depend on.
 ---
 
 # simplelogin_alias (Resource)
 
 Manages a SimpleLogin alias with an exact address on a verified custom domain, including its forwarding mailboxes, note, display name and enabled state.
 
-~> **Deletion is effectively irreversible.** When an alias on a custom domain is deleted, SimpleLogin moves the address to the domain's trash and refuses to create the same address again while it is there. Destroying this resource, or changing `email` (which forces replacement), deletes the alias. Use `lifecycle { prevent_destroy = true }` for addresses you depend on.
+~> **Deletion is effectively irreversible.** When an alias on a custom domain is deleted, SimpleLogin moves the address to the domain's trash and refuses to create the same address again while it is there. Destroying this resource, or changing `email` (which forces replacement), deletes the alias unless `on_destroy = "disable"` is set. Use `lifecycle { prevent_destroy = true }` for addresses you depend on.
 
 ## Example Usage
 
@@ -48,6 +48,7 @@ resource "simplelogin_alias" "admin" {
 - `enabled` (Boolean) Whether the alias forwards mail. Mail sent to a disabled alias is blocked instead of forwarded. Defaults to `true`.
 - `name` (String) Display name used as the sender name when replying from the alias. At most 128 characters, no line breaks. Omit to leave it unset.
 - `note` (String) Free-form note. Omit to keep the alias without a note; an empty string is not allowed.
+- `on_destroy` (String) What happens to the alias in SimpleLogin when this resource is destroyed, including when it is replaced because `email` changed. `"delete"` (default) deletes the alias, which moves its address to the domain trash. `"disable"` only disables it and leaves it in SimpleLogin, where it can be re-enabled or imported again; applying the same configuration again after such a destroy fails with *Alias already exists* until the alias is imported. This setting is stored in state only and makes no API call when changed. The value in state at destroy time applies, so apply a change to `on_destroy` before removing the resource.
 
 ### Read-Only
 

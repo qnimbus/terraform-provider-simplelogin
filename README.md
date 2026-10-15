@@ -38,6 +38,7 @@ The `simplelogin_alias` resource manages:
 | `note`        | string        | Optional. Updated in place; removing it clears the note                    |
 | `name`        | string        | Optional, ≤ 128 chars. Display name; updated in place                      |
 | `enabled`     | bool          | Optional, default `true`. Updated in place                                 |
+| `on_destroy`  | string        | Optional, `"delete"` (default) or `"disable"`: what destroying does        |
 
 Full reference: [`docs/`](docs/index.md) (generated from the schemas).
 
@@ -140,7 +141,10 @@ Adopting an alias never modifies it:
 
 3. Run `tofu plan`. It must read `1 to import, 0 to add, 0 to change, 0 to destroy`.
    If it shows changes, adjust the resource block until it doesn't, so that the
-   apply doesn't alter mail delivery.
+   apply doesn't alter mail delivery. The one harmless exception is
+   `on_destroy = "disable"`. SimpleLogin doesn't store it, so an import starts at
+   `"delete"` and the plan shows `on_destroy` changing in place. That change
+   makes no API call.
 4. Run `tofu apply`. Afterwards you can remove the `import` block.
 
 `tofu import simplelogin_alias.admin 12345` also works.
@@ -161,6 +165,34 @@ removed {
 ```
 
 (or `tofu state rm simplelogin_alias.admin`).
+
+### Disabling instead of deleting on destroy
+
+By default, destroying a `simplelogin_alias` deletes the alias, and so does
+replacing it because `email` changed. With `on_destroy = "disable"` the alias
+is only **disabled** and stays in SimpleLogin, so its address is never lost to
+the domain trash:
+
+```hcl
+resource "simplelogin_alias" "admin" {
+  email       = "admin@example.com"
+  mailbox_ids = [data.simplelogin_mailbox.primary.id]
+  on_destroy  = "disable"
+}
+```
+
+- The plan still says `destroy`. The apply prints a warning that the alias was
+  only disabled, with its ID.
+- The disabled alias still holds its address. Applying the same configuration
+  again fails with *Alias already exists*. Import the alias by ID instead, and
+  it is re-enabled because `enabled` defaults to `true`.
+- The setting lives only in state, and changing it makes no API call. The value
+  **in state** at destroy time counts, so apply `on_destroy = "disable"` first,
+  then remove the resource or change its `email`.
+- This doesn't replace `prevent_destroy`, which stops the destroy outright.
+  `on_destroy` decides what a destroy does once it is allowed. To stop
+  managing an alias and leave it fully untouched (still enabled), use the
+  `removed` block above.
 
 ## Installing a release
 

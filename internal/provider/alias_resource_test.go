@@ -484,3 +484,119 @@ resource "simplelogin_alias" "test" {
 		},
 	})
 }
+
+func TestAliasResourceOnDestroyDisable(t *testing.T) {
+	f := newFakeSimpleLogin(t)
+	const email = "keep@example.com"
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		// The final destroy only disables the alias.
+		CheckDestroy: func(*terraform.State) error {
+			a := f.aliasByEmail(email)
+			if a == nil {
+				return fmt.Errorf("alias %s was deleted", email)
+			}
+			if a.Enabled || f.deletes != 0 {
+				return fmt.Errorf("enabled=%v deletes=%d", a.Enabled, f.deletes)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: f.providerConfig() + `
+resource "simplelogin_alias" "test" {
+  email       = "keep@example.com"
+  mailbox_ids = [1]
+}
+`,
+				Check: resource.TestCheckResourceAttr(aliasAddr, "on_destroy", "delete"),
+			},
+			// Changing only on_destroy is an in-place update without API calls.
+			{
+				Config: f.providerConfig() + `
+resource "simplelogin_alias" "test" {
+  email       = "keep@example.com"
+  mailbox_ids = [1]
+  on_destroy  = "disable"
+}
+`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(aliasAddr, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(aliasAddr, "on_destroy", "disable"),
+					func(*terraform.State) error {
+						if n := f.mutations(); n != 1 {
+							return fmt.Errorf("%d mutating API calls, want only the initial create", n)
+						}
+						return nil
+					},
+				),
+			},
+			// Import does not know on_destroy; it starts at the default.
+			{
+				ResourceName:            aliasAddr,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"on_destroy"},
+			},
+		},
+	})
+}
+
+func TestAliasResourceOnDestroyDisableReplacement(t *testing.T) {
+	f := newFakeSimpleLogin(t)
+	config := func(email string) string {
+		return f.providerConfig() + fmt.Sprintf(`
+resource "simplelogin_alias" "test" {
+  email       = %q
+  mailbox_ids = [1]
+  on_destroy  = "disable"
+}
+`, email)
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config("first@example.com")},
+			// Replacement disables the old alias instead of deleting it.
+			{
+				Config: config("second@example.com"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(aliasAddr, plancheck.ResourceActionDestroyBeforeCreate)},
+				},
+				Check: func(*terraform.State) error {
+					old, cur := f.aliasByEmail("first@example.com"), f.aliasByEmail("second@example.com")
+					if old == nil || old.Enabled || cur == nil || !cur.Enabled || f.deletes != 0 {
+						return fmt.Errorf("old=%+v new=%+v deletes=%d", old, cur, f.deletes)
+					}
+					return nil
+				},
+			},
+			// The disabled alias still holds its address: going back is
+			// refused rather than silently adopting it.
+			{
+				Config:      config("first@example.com"),
+				ExpectError: regexp.MustCompile(`Alias already exists`),
+			},
+		},
+	})
+}
+
+func TestAliasResourceOnDestroyValidation(t *testing.T) {
+	f := newFakeSimpleLogin(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: f.providerConfig() + `
+resource "simplelogin_alias" "test" {
+  email       = "v@example.com"
+  mailbox_ids = [1]
+  on_destroy  = "abandon"
+}
+`,
+			PlanOnly:    true,
+			ExpectError: regexp.MustCompile(`value must be one of`),
+		}},
+	})
+}

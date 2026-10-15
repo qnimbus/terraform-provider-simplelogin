@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -45,7 +46,13 @@ type aliasResourceModel struct {
 	Note       types.String `tfsdk:"note"`
 	Name       types.String `tfsdk:"name"`
 	Enabled    types.Bool   `tfsdk:"enabled"`
+	OnDestroy  types.String `tfsdk:"on_destroy"`
 }
+
+const (
+	onDestroyDelete  = "delete"
+	onDestroyDisable = "disable"
+)
 
 func (r *aliasResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_alias"
@@ -57,7 +64,8 @@ func (r *aliasResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"including its forwarding mailboxes, note, display name and enabled state.\n\n" +
 			"~> **Deletion is effectively irreversible.** When an alias on a custom domain is deleted, SimpleLogin moves the address " +
 			"to the domain's trash and refuses to create the same address again while it is there. Destroying this resource, or changing `email` " +
-			"(which forces replacement), deletes the alias. Use `lifecycle { prevent_destroy = true }` for addresses you depend on.",
+			"(which forces replacement), deletes the alias unless `on_destroy = \"disable\"` is set. " +
+			"Use `lifecycle { prevent_destroy = true }` for addresses you depend on.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "SimpleLogin alias ID.",
@@ -101,6 +109,20 @@ func (r *aliasResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
+			},
+			"on_destroy": schema.StringAttribute{
+				MarkdownDescription: "What happens to the alias in SimpleLogin when this resource is destroyed, including when it is " +
+					"replaced because `email` changed. `\"delete\"` (default) deletes the alias, which moves its address to the domain trash. " +
+					"`\"disable\"` only disables it and leaves it in SimpleLogin, where it can be re-enabled or imported again; " +
+					"applying the same configuration again after such a destroy fails with *Alias already exists* until the alias is imported. " +
+					"This setting is stored in state only and makes no API call when changed. The value in state at destroy time applies, " +
+					"so apply a change to `on_destroy` before removing the resource.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString(onDestroyDelete),
+				Validators: []validator.String{
+					stringvalidator.OneOf(onDestroyDelete, onDestroyDisable),
+				},
 			},
 		},
 	}
@@ -183,7 +205,7 @@ func (r *aliasResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if created.Email != email {
 		// Track what was created so OpenTofu marks it tainted and replaces it,
 		// rather than leaving an unmanaged alias with the wrong address behind.
-		resp.Diagnostics.Append(resp.State.Set(ctx, aliasModelFromAPI(created))...)
+		resp.Diagnostics.Append(resp.State.Set(ctx, aliasModelFromAPI(created, plan.OnDestroy))...)
 		resp.Diagnostics.AddError("SimpleLogin created a different address",
 			fmt.Sprintf("Requested %s but SimpleLogin created %s (alias ID %d). The alias has been recorded in state as tainted; "+
 				"the next apply will delete it and try again. Please report this issue.", email, created.Email, created.ID))
@@ -195,7 +217,7 @@ func (r *aliasResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// whose address is then blocked by the domain trash. Later failures are
 	// therefore reported as warnings; the refresh before the next plan reads
 	// the real values and plans an in-place update if anything is off.
-	model := aliasModelFromAPI(created)
+	model := aliasModelFromAPI(created, plan.OnDestroy)
 
 	// New aliases are always enabled.
 	if !plan.Enabled.ValueBool() {
@@ -217,7 +239,7 @@ func (r *aliasResource) Create(ctx context.Context, req resource.CreateRequest, 
 			fmt.Sprintf("Alias %s (ID %d) was created. Reading it back failed, so state is based on the create response; "+
 				"the next refresh will correct any difference.\n\n%s", email, created.ID, err))
 	} else {
-		model = aliasModelFromAPI(a)
+		model = aliasModelFromAPI(a, plan.OnDestroy)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
@@ -244,7 +266,7 @@ func (r *aliasResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 	// On import, email is unknown and a missing alias is an error rather than
 	// a removal.
-	r.readInto(ctx, id, state.Email.ValueString(), &resp.State, &resp.Diagnostics, true)
+	r.readInto(ctx, id, state.Email.ValueString(), state.OnDestroy, &resp.State, &resp.Diagnostics, true)
 }
 
 func (r *aliasResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -292,7 +314,7 @@ func (r *aliasResource) Update(ctx context.Context, req resource.UpdateRequest, 
 			resp.Diagnostics.Append(diags...)
 			// The PATCH above already succeeded: record what is live now.
 			var readDiags diag.Diagnostics
-			r.readInto(ctx, id, state.Email.ValueString(), &resp.State, &readDiags, false)
+			r.readInto(ctx, id, state.Email.ValueString(), plan.OnDestroy, &resp.State, &readDiags, false)
 			if !readDiags.HasError() {
 				resp.Diagnostics.Append(readDiags...)
 			}
@@ -300,7 +322,7 @@ func (r *aliasResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 	}
 
-	r.readInto(ctx, id, state.Email.ValueString(), &resp.State, &resp.Diagnostics, false)
+	r.readInto(ctx, id, state.Email.ValueString(), plan.OnDestroy, &resp.State, &resp.Diagnostics, false)
 }
 
 func (r *aliasResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -328,6 +350,18 @@ func (r *aliasResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	if !strings.EqualFold(current.Email, email) {
 		resp.Diagnostics.AddError("Refusing to delete SimpleLogin alias",
 			fmt.Sprintf("Alias ID %d has address %s, but state expects %s. Not deleting it.", id, current.Email, email))
+		return
+	}
+
+	if state.OnDestroy.ValueString() == onDestroyDisable {
+		// Leave the alias in SimpleLogin, disabled. On error the resource
+		// stays in state, so the destroy can simply be retried.
+		resp.Diagnostics.Append(r.ensureEnabled(ctx, id, current.Enabled, false)...)
+		if !resp.Diagnostics.HasError() {
+			resp.Diagnostics.AddWarning("SimpleLogin alias disabled, not deleted",
+				fmt.Sprintf("on_destroy = \"disable\": alias %s (ID %d) was disabled and still exists in SimpleLogin. "+
+					"To manage it again, import it by ID %d.", email, id, id))
+		}
 		return
 	}
 
@@ -378,9 +412,10 @@ type stateSetter interface {
 	RemoveResource(ctx context.Context)
 }
 
-// readInto reads the alias and writes it to state. If allowRemove is set and
-// the alias is confirmed gone, it is removed from state.
-func (r *aliasResource) readInto(ctx context.Context, id int64, knownEmail string, state stateSetter, diags *diag.Diagnostics, allowRemove bool) {
+// readInto reads the alias and writes it to state, together with onDestroy,
+// which exists only in state. If allowRemove is set and the alias is
+// confirmed gone, it is removed from state.
+func (r *aliasResource) readInto(ctx context.Context, id int64, knownEmail string, onDestroy types.String, state stateSetter, diags *diag.Diagnostics, allowRemove bool) {
 	a, err := r.client.GetAlias(ctx, id, knownEmail)
 	if errors.Is(err, client.ErrNotFound) && allowRemove {
 		state.RemoveResource(ctx)
@@ -390,11 +425,17 @@ func (r *aliasResource) readInto(ctx context.Context, id int64, knownEmail strin
 		diags.AddError("Failed to read SimpleLogin alias", err.Error())
 		return
 	}
-	diags.Append(state.Set(ctx, aliasModelFromAPI(a))...)
+	diags.Append(state.Set(ctx, aliasModelFromAPI(a, onDestroy))...)
 }
 
-func aliasModelFromAPI(a *client.Alias) aliasResourceModel {
+// aliasModelFromAPI builds the resource model. onDestroy is not part of the
+// API object; null (e.g. right after import) becomes the default.
+func aliasModelFromAPI(a *client.Alias, onDestroy types.String) aliasResourceModel {
+	if onDestroy.IsNull() || onDestroy.IsUnknown() {
+		onDestroy = types.StringValue(onDestroyDelete)
+	}
 	return aliasResourceModel{
+		OnDestroy:  onDestroy,
 		ID:         types.StringValue(strconv.FormatInt(a.ID, 10)),
 		Email:      types.StringValue(a.Email),
 		MailboxIDs: int64Set(a.MailboxIDs()),

@@ -76,7 +76,7 @@ func (d *aliasDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		resp.Diagnostics.AddError("Failed to read SimpleLogin alias", err.Error())
 		return
 	}
-	m := aliasModelFromAPI(a)
+	m := aliasModelFromAPI(a, types.StringNull())
 	resp.Diagnostics.Append(resp.State.Set(ctx, aliasDataSourceModel{
 		ID:                m.ID,
 		Email:             m.Email,
