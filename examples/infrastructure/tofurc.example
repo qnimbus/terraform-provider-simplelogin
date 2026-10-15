@@ -1,0 +1,15 @@
+# OpenTofu CLI configuration for installing the SimpleLogin provider from a
+# local filesystem mirror (see scripts/install-provider-mirror.sh).
+#
+#   export TF_CLI_CONFIG_FILE="$PWD/.tofurc"
+#
+# Replace /path/to/provider-mirror with the absolute mirror directory.
+provider_installation {
+  filesystem_mirror {
+    path    = "/path/to/provider-mirror"
+    include = ["registry.terraform.io/qnimbus/simplelogin"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/qnimbus/simplelogin"]
+  }
+}

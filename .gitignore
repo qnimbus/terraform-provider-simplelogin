@@ -1,35 +1,41 @@
-*.dll
-*.exe
-.DS_Store
-example.tf
-terraform.tfplan
-terraform.tfstate
+# Build output
 bin/
 dist/
-modules-dev/
-/pkg/
-website/.vagrant
-website/.bundle
-website/build
-website/node_modules
-.vagrant/
-*.backup
-./*.tfstate
+*.exe
+*.dll
+*.test
+
+# OpenTofu / Terraform working files, state and plans
 .terraform/
-*.log
-*.bak
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Local CLI configuration (dev_overrides, mirrors) and provider mirrors
+*.tofurc
+.tofurc
+.terraformrc
+terraform.rc
+.terraform-mirror/
+provider-mirror/
+
+# Credentials and local overrides
+.env
+.env.*
+*.auto.tfvars
+secret.tfvars
+.mise.local.toml
+.mise/config.local.toml
+
+# Editors / OS
+.DS_Store
+.idea/
+*.iml
+.vscode/
 *~
 .*.swp
-.idea
-*.iml
-*.test
-*.iml
-
-website/vendor
-
-# Test exclusions
-!command/test-fixtures/**/*.tfstate
-!command/test-fixtures/**/.terraform/
-
-# Keep windows files with windows line endings
-*.winfile eol=crlf
+*.bak
+*.log

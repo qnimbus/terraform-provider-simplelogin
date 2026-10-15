@@ -1,0 +1,65 @@
+[tools]
+go = "1.27.2"
+opentofu = "1.13.1"
+
+[tasks.build]
+description = "Build the provider into ./bin"
+run = "go build -o bin/terraform-provider-simplelogin ."
+
+[tasks.fmt]
+description = "Format Go code and examples"
+run = ["gofmt -s -w .", "tofu fmt -recursive examples/"]
+
+[tasks.check]
+description = "Check formatting, go.mod tidiness and run go vet"
+run = [
+  'test -z "$(gofmt -s -l .)" || { gofmt -s -l .; echo "run: mise run fmt"; exit 1; }',
+  "tofu fmt -check -recursive examples/",
+  "go mod tidy -diff",
+  "go vet ./...",
+]
+
+[tasks.test]
+description = "Unit and provider tests (mock API, real OpenTofu; no credentials)"
+# terraform-plugin-testing drives the pinned OpenTofu binary.
+run = 'TF_ACC_TERRAFORM_PATH="${TF_ACC_TERRAFORM_PATH:-$(command -v tofu)}" go test -count=1 -timeout=10m ./...'
+
+[tasks.testacc]
+description = "LIVE acceptance tests against SimpleLogin (see internal/provider/acceptance_test.go)"
+run = "TF_ACC=1 TF_ACC_TERRAFORM_PATH=\"${TF_ACC_TERRAFORM_PATH:-$(command -v tofu)}\" go test -count=1 -v -timeout=30m -run '^TestAcc' ./internal/provider/"
+
+[tasks.docs]
+description = "Generate docs/ from schemas and examples"
+run = "go generate ./..."
+dir = "tools"
+
+[tasks.dev-tofurc]
+description = "Build the provider and write bin/dev.tofurc with dev_overrides"
+depends = ["build"]
+run = '''
+cat > bin/dev.tofurc <<TOFURC
+provider_installation {
+  dev_overrides {
+    "registry.terraform.io/qnimbus/simplelogin" = "$PWD/bin"
+  }
+  direct {}
+}
+TOFURC
+echo "wrote bin/dev.tofurc; use: export TF_CLI_CONFIG_FILE=$PWD/bin/dev.tofurc"
+'''
+
+[tasks.dev-validate]
+description = "tofu validate the examples with the locally built provider"
+depends = ["dev-tofurc"]
+env = { TF_CLI_CONFIG_FILE = "{{ config_root }}/bin/dev.tofurc" }
+run = [
+  "tofu -chdir=examples/dev validate -no-color",
+  "tofu -chdir=examples/infrastructure validate -no-color",
+]
+
+[tasks.dev-plan]
+description = "tofu plan the smoke-test example with the locally built provider"
+depends = ["dev-tofurc"]
+env = { TF_CLI_CONFIG_FILE = "{{ config_root }}/bin/dev.tofurc" }
+# Planning a new alias makes no API calls, so a placeholder key suffices.
+run = 'SIMPLELOGIN_API_KEY="${SIMPLELOGIN_API_KEY:-placeholder}" tofu -chdir=examples/dev plan -refresh=false -lock=false -input=false -no-color'

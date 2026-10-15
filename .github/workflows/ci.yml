@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Trust the repository mise config (tool pins and tasks).
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, vet and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Installs the Go and OpenTofu versions pinned in .mise/config.toml.
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - name: Format, go.mod and vet checks
+        run: mise run check
+      - name: Build
+        run: mise run build
+      # Unit tests and provider lifecycle tests against a mock SimpleLogin API,
+      # driven by OpenTofu. No SimpleLogin credentials are used or needed.
+      - name: Test (race detector)
+        run: TF_ACC_TERRAFORM_PATH="$(mise which tofu)" go test -race -count=1 -timeout=15m ./...
+      - name: Validate examples with the built provider
+        run: mise run dev-validate
+      - name: Plan example with the built provider
+        run: mise run dev-plan
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+
+  docs:
+    name: Generated docs are up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - run: mise run docs
+      - run: |
+          git diff --compact-summary --exit-code -- docs/ || \
+            (echo "docs/ is out of date: run 'mise run docs' and commit the result."; exit 1)
+
+  goreleaser-check:
+    name: Release config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
