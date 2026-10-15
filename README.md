@@ -6,15 +6,18 @@ mailboxes as code. Built with the
 and tested with [OpenTofu](https://opentofu.org).
 
 - Provider source address: **`registry.terraform.io/qnimbus/simplelogin`**
-- Status: **0.1 MVP**, not yet published to any registry. Install it from GitHub
+- Status: **0.1 MVP**, not yet published to any registry. The live acceptance
+  test passes against the hosted service (see [Tests](#tests)). Install it from GitHub
   releases through a filesystem mirror (see [Installing a release](#installing-a-release)).
 
 > [!WARNING]
 > **Deleting an alias cannot be undone through the API.** SimpleLogin moves a
 > deleted custom-domain alias into the domain's *trash* and refuses to create
 > that address again (HTTP 409) while it is there. The domain trash has no
-> restore action; the alias, its contacts and history are gone, and the
-> address can only be freed by removing it from the trash in the dashboard. Destroying a
+> restore action; the alias, its contacts and history are gone. The address
+> can only be freed by removing it from the trash in the dashboard (domain →
+> *Deleted Alias* → *Remove from trash*). Use the per-entry button rather than
+> *Empty Trash*, which irreversibly frees every deleted address of the domain. Destroying a
 > `simplelogin_alias`, or changing its `email` (which forces replacement),
 > deletes the alias. Put `lifecycle { prevent_destroy = true }` on every
 > address you depend on, and check every plan for `destroy` / `must be replaced`.
@@ -326,6 +329,13 @@ filesystem mirror for that.
   until you remove it there in the dashboard. Existing aliases are never
   touched. Normal CI never runs these tests.
 
+  Last verified on 2026-10-15 against the hosted service (app.simplelogin.io)
+  with OpenTofu 1.13.1. That run covered authentication, mailbox and domain
+  lookup, exact-address creation on a custom domain, in-place note/name
+  updates, disabling via toggle, import by ID and deletion. Error paths (rate
+  limits, 5xx, 409 for trashed addresses, partial failures after create) are
+  only covered by the mock-API tests.
+
 ### Releasing
 
 1. Make sure CI on `main` is green and update `CHANGELOG.md`.
@@ -371,9 +381,11 @@ implementation:
   deletes it and blocks its address in the trash. The refresh before the next
   plan picks up the real values and plans an in-place update if needed.
 - **Deletion:** custom-domain aliases go to the domain trash and block the
-  address (see the warning above). According to the upstream source, removing
-  the entry from the domain trash makes the address available again. This has
-  not been verified against the hosted service. Aliases on SimpleLogin domains may instead
+  address (see the warning above). Removing the entry from the domain trash
+  makes the address available again. The upstream source and the hosted
+  dashboard ("Remove all deleted aliases from the trash, allowing them to be
+  re-created") both say so. Recreating a freed address through this provider
+  has not itself been tested. Aliases on SimpleLogin domains may instead
   be moved to the user trash, depending on account settings. Such an alias
   stays readable by ID (disabled) for a while.
 - **Mailbox order:** the API returns an alias' mailboxes in arbitrary order,
