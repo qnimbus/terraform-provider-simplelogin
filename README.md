@@ -53,8 +53,8 @@ Full reference: [`docs/`](docs/index.md) (generated from the schemas).
   and manage their mailboxes, note, name and enabled state.
 - Random aliases, contacts/reverse aliases, PGP settings and pinning.
 - Creating, changing or deleting mailboxes, custom domains or DNS records.
-  Mailboxes and domains are read-only through data sources. DNS stays with
-  your DNS tooling (e.g. DNSControl).
+  Mailboxes and domains are read-only through data sources. The DNS records
+  SimpleLogin needs for a custom domain have to be managed separately.
 - Managing the alias trash. Use the SimpleLogin dashboard for that.
 
 ## Requirements
@@ -256,13 +256,6 @@ A complete example is in [`examples/infrastructure/`](examples/infrastructure).
 
 To upgrade, install the new version into the mirror, bump the constraint and run
 `tofu init -upgrade` plus `tofu providers lock …` again.
-
-### Ownership split with DNSControl
-
-OpenTofu owns the SimpleLogin aliases and their forwarding configuration.
-DNSControl is the only authority for DNS: MX, SPF, DKIM, DMARC and the
-SimpleLogin ownership record belong in DNSControl, not in OpenTofu. This
-provider does not manage DNS.
 
 ## Development
 

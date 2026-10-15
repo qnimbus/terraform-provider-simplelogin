@@ -1,8 +1,5 @@
-# SimpleLogin aliases managed by OpenTofu.
-#
-# DNS for the alias domain (MX, SPF, DKIM, DMARC and the SimpleLogin
-# verification record) is owned exclusively by DNSControl. Nothing here
-# manages DNS records.
+# SimpleLogin aliases managed by OpenTofu. This provider does not manage the
+# alias domain's DNS records; set those up separately.
 
 variable "alias_domain" {
   description = "Verified SimpleLogin custom domain the aliases live on."
